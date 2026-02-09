@@ -9,6 +9,8 @@ from aws_cdk import (
     aws_apigateway as apigw_,
     aws_ec2 as ec2,
     aws_iam as iam,
+    aws_logs as logs_,
+    aws_kms as kms_,
     Duration,
 )
 from constructs import Construct
@@ -19,6 +21,14 @@ TABLE_NAME = "demo_table"
 class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Create KMS key for log encryption
+        log_encryption_key = kms_.Key(
+            self,
+            "LogEncryptionKey",
+            enable_key_rotation=True,
+            description="KMS key for encrypting CloudWatch Logs",
+        )
 
         # VPC
         vpc = ec2.Vpc(
@@ -31,6 +41,21 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
                     cidr_mask=24
                 )
             ],
+        )
+        
+        # Create log group for VPC Flow Logs
+        vpc_flow_log_group = logs_.LogGroup(
+            self,
+            "VpcFlowLogGroup",
+            retention=logs_.RetentionDays.ONE_YEAR,
+            encryption_key=log_encryption_key,
+        )
+
+        # Enable VPC Flow Logs
+        vpc.add_flow_log(
+            "FlowLog",
+            destination=ec2.FlowLogDestination.to_cloud_watch_logs(vpc_flow_log_group),
+            traffic_type=ec2.FlowLogTrafficType.ALL,
         )
         
         # Create VPC endpoint
@@ -58,13 +83,14 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             )
         )
 
-        # Create DynamoDb Table
+        # Create DynamoDb Table with point-in-time recovery
         demo_table = dynamodb_.Table(
             self,
             TABLE_NAME,
             partition_key=dynamodb_.Attribute(
                 name="id", type=dynamodb_.AttributeType.STRING
             ),
+            point_in_time_recovery=True,
         )
 
         # Create the Lambda function to receive the request
@@ -81,15 +107,38 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             ),
             memory_size=1024,
             timeout=Duration.minutes(5),
+            log_retention=logs_.RetentionDays.ONE_YEAR,
         )
 
         # grant permission to lambda to write to demo table
         demo_table.grant_write_data(api_hanlder)
         api_hanlder.add_environment("TABLE_NAME", demo_table.table_name)
 
-        # Create API Gateway
+        # Create log group for API Gateway access logs
+        api_log_group = logs_.LogGroup(
+            self,
+            "ApiAccessLogGroup",
+            retention=logs_.RetentionDays.ONE_YEAR,
+            encryption_key=log_encryption_key,
+        )
+
+        # Create API Gateway with access logging
         apigw_.LambdaRestApi(
             self,
             "Endpoint",
             handler=api_hanlder,
+            deploy_options=apigw_.StageOptions(
+                access_log_destination=apigw_.LogGroupLogDestination(api_log_group),
+                access_log_format=apigw_.AccessLogFormat.json_with_standard_fields(
+                    caller=True,
+                    http_method=True,
+                    ip=True,
+                    protocol=True,
+                    request_time=True,
+                    resource_path=True,
+                    response_length=True,
+                    status=True,
+                    user=True,
+                ),
+            ),
         )

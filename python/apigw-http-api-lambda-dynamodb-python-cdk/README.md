@@ -69,6 +69,50 @@ With specific profile
 $ cdk deploy --profile test
 ```
 
+## Security Logging Requirements
+
+### CloudTrail Configuration
+This stack requires AWS CloudTrail to be enabled for comprehensive audit logging of API activity. CloudTrail provides visibility into user activity by recording actions taken on your account.
+
+**Organization-wide setup (recommended):**
+- Configure an AWS Organizations trail to capture API activity across all accounts
+- Ensure the trail logs management events and data events for DynamoDB
+
+**Single account setup:**
+```bash
+aws cloudtrail create-trail --name security-audit-trail --s3-bucket-name <your-cloudtrail-bucket>
+aws cloudtrail start-logging --name security-audit-trail
+```
+
+Refer to the [AWS CloudTrail documentation](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-create-and-update-a-trail.html) for detailed setup instructions.
+
+### Logging Features Implemented
+This stack implements the following logging capabilities in compliance with AWS Well-Architected Framework SEC04-BP01:
+
+- **VPC Flow Logs**: Captures network traffic information for security analysis
+- **API Gateway Access Logs**: Records all API requests with caller identity and request details
+- **Lambda Function Logs**: Structured JSON logging with request context and error handling
+- **CloudWatch Log Encryption**: All logs encrypted using AWS KMS with automatic key rotation
+- **Log Retention**: 1-year retention policy for all log groups
+- **DynamoDB Point-in-Time Recovery**: Enables audit trail and data protection
+
+### Accessing Logs
+After deployment, you can query logs using CloudWatch Logs Insights:
+
+```bash
+# Query Lambda logs
+aws logs start-query --log-group-name /aws/lambda/apigw_handler \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s) \
+  --query-string 'fields @timestamp, event, request_id | sort @timestamp desc'
+
+# Query API Gateway access logs
+aws logs start-query --log-group-name <api-log-group-name> \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s) \
+  --query-string 'fields @timestamp, ip, status, requestTime | sort @timestamp desc'
+```
+
 ## After Deploy
 Navigate to AWS API Gateway console and test the API with below sample data 
 ```json
