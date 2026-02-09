@@ -113,6 +113,49 @@ aws logs start-query --log-group-name <api-log-group-name> \
   --query-string 'fields @timestamp, ip, status, requestTime | sort @timestamp desc'
 ```
 
+## Distributed Tracing and Monitoring
+
+### AWS X-Ray Tracing
+This stack implements end-to-end distributed tracing in compliance with AWS Well-Architected Framework REL06-BP07:
+
+- **API Gateway X-Ray Tracing**: Captures request entry points and API Gateway latency
+- **Lambda X-Ray Tracing**: Traces function execution, cold starts, and initialization time
+- **DynamoDB Call Tracing**: Automatically instruments boto3 DynamoDB calls using X-Ray SDK
+- **Service Map**: Visualizes complete request flow from API Gateway → Lambda → DynamoDB
+
+### Accessing X-Ray Traces
+After deployment, view traces in the AWS X-Ray console:
+
+1. **Service Map**: Navigate to AWS X-Ray console → Service map to visualize component interactions
+2. **Traces**: View individual request traces showing latency breakdown across services
+3. **Analytics**: Use trace analytics to identify performance bottlenecks and error patterns
+
+```bash
+# Get trace summaries for the last hour
+aws xray get-trace-summaries \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s)
+```
+
+### CloudWatch Alarms
+The stack configures the following CloudWatch alarms for proactive monitoring:
+
+- **Lambda Error Alarm**: Triggers when Lambda function errors occur (threshold: 1 error)
+- **API Gateway 5xx Alarm**: Alerts on server errors (threshold: 5 errors in 2 evaluation periods)
+- **API Gateway 4xx Alarm**: Monitors client errors (threshold: 10 errors in 2 evaluation periods)
+
+Configure SNS topics to receive alarm notifications:
+
+```bash
+# Create SNS topic for alarm notifications
+aws sns create-topic --name api-monitoring-alerts
+
+# Subscribe to the topic
+aws sns subscribe --topic-arn <topic-arn> --protocol email --notification-endpoint your-email@example.com
+```
+
+Then update the CDK stack to add SNS actions to the alarms.
+
 ## After Deploy
 Navigate to AWS API Gateway console and test the API with below sample data 
 ```json
@@ -128,6 +171,8 @@ You should get below response
 ```json
 {"message": "Successfully inserted data!"}
 ```
+
+After making requests, check the X-Ray service map to see the complete trace of your request through API Gateway, Lambda, and DynamoDB.
 
 ## Cleanup 
 Run below script to delete AWS resources created by this sample stack.
